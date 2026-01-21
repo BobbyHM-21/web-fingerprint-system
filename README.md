@@ -1,66 +1,116 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
-
 <p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
+  <img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="300" alt="Laravel Logo">
 </p>
 
-## About Laravel
+# Centralized Fingerprint Management System
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+A robust and modern web-based application to manage **ZKTeco Biometric Devices**, Employee Data, and Attendance Logs centrally. Built with **Laravel 11**, **Filament v3**, and a custom **Smart Sync Engine**.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## 🚀 Key Features
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+### 1. Smart Sync Engine
+The heart of the system is the **Smart Sync** feature (`/admin/smart-sync`), which offers:
+-   **Bi-Directional Scanning**: Compares data between the Database and a selected Machine in real-time.
+-   **Granular Control**: Sync users One-by-One or Bulk (Push to Device / Import to DB).
+-   **Device Explorer**: View **ALL** users currently stored on a device, including their **Fingerprint Count**.
+-   **Visual Diff**: Color-coded lists show exactly who is missing where.
 
-## Learning Laravel
+### 2. Intelligent Device Monitoring
+-   **Sticky Status**: Machine status (Online/Offline) is persistent based on the last interaction (Ping/Connect). No more flickering statuses.
+-   **Real-time Actions**:
+    -   **Test Connection**: Verifies network, updates status immediately.
+    -   **Ping**: Simple ICMP check.
+    -   **Pull Employees**: Fetches user data from the machine.
+-   **Detailed Info**: View IP, Port, Protocol, and User Count at a glance.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+### 3. Strict Admin Panel (Filament)
+Organized strictly according to the operational hierarchy:
+-   **Monitoring**: Data Mesin, Status Sinkronisasi, Smart Sync.
+-   **Personalia**: Data Karyawan (with Distribution Matrix & Fingerprint Count), Data Jari & Wajah.
+-   **Absensi**: Log Kehadiran, Laporan.
+-   **Pengaturan**: User Management, App Settings.
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+### 4. Simulation & Testing
+-   **Dummy Data Seeder**: Built-in seeder to populate the DB with 50+ fake employees, devices, and attendance logs for testing.
+-   **Visual Feedback**: Loading indicators on all long-running processes (Scanning, Pushing, Importing).
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+---
 
-## Laravel Sponsors
+## 🛠️ Technology Stack
+-   **Framework**: Laravel 11.x
+-   **Admin Panel**: FilamentPHP v3
+-   **Biometric Library**: `rats/zkteco` (Modified for persistent connections)
+-   **Frontend**: Livewire + Blade + TailwindCSS
+-   **Database**: MySQL / MariaDB
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+---
 
-### Premium Partners
+## 📦 Installation
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+1.  **Clone Repository**
+    ```bash
+    git clone https://github.com/BobbyHM-21/web-fingerprint-system.git
+    cd web-fingerprint-system
+    ```
 
-## Contributing
+2.  **Install Dependencies**
+    ```bash
+    composer install
+    npm install && npm run build
+    ```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+3.  **Setup Environment**
+    ```bash
+    cp .env.example .env
+    # Configure your DB_DATABASE, DB_USERNAME, DB_PASSWORD in .env
+    php artisan key:generate
+    ```
 
-## Code of Conduct
+4.  **Migrate Database**
+    ```bash
+    php artisan migrate
+    ```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+5.  **Seed Dummy Data (Optional)**
+    To see the system in action with fake data:
+    ```bash
+    php artisan db:seed --class=DummyDataSeeder
+    ```
 
-## Security Vulnerabilities
+6.  **Create Admin User**
+    ```bash
+    php artisan make:filament-user
+    ```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+7.  **Run Server**
+    ```bash
+    php artisan serve
+    ```
 
-## License
+---
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## 📸 Usage
+
+### Using Smart Sync
+1.  Go to **Monitoring > Smart Sync**.
+2.  Select a **Target Device** from the dropdown.
+3.  Click **Start Scan**.
+4.  Review the **Differences** (Left: Missing in Device, Right: Missing in DB).
+5.  Use **Push** or **Import** buttons to sync data.
+6.  Scroll down to see the **Full Device Content** table.
+
+### Device Management
+1.  Go to **Monitoring > Data Mesin**.
+2.  Click **Test** or **Ping** to check connectivity.
+3.  If successful, the status becomes **Green (Online)**.
+4.  If failed, the status becomes **Red (Offline)**. 
+
+---
+
+## 🔒 Security
+-   **CSRF Protection**: ADMS routes are excluded for device communication compatibility.
+-   **Strict Types**: ZKTeco communication enforces strict Integer types for critical IDs to prevent device errors.
+
+---
+
+© 2026 Fingerprint Management System.
