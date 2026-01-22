@@ -2,175 +2,335 @@
 
 namespace App\Services;
 
-use App\Models\Device;
 use Rats\Zkteco\Lib\ZKTeco;
+use Illuminate\Support\Collection;
+use Exception;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * ZKTecoService - Antigravity Pattern
+ * 
+ * Service ini adalah "penerjemah" antara Laravel dan Mesin Fingerprint.
+ * Menggunakan Wrapper Pattern agar mudah diganti library-nya nanti.
+ * 
+ * Fitur Utama:
+ * - Auto Connect/Disconnect
+ * - Return Laravel Collection (bukan Array mentah)
+ * - Error Handling yang kuat
+ * - Destructor untuk auto-cleanup
+ */
 class ZKTecoService
 {
+    protected ?ZKTeco $zk = null;
+    protected string $ip;
+    protected int $port;
+    protected bool $isConnected = false;
+
     /**
-     * Connect to the ZKTeco device.
-     * 
-     * @param Device $device
-     * @return ZKTeco|false
+     * Inisialisasi Service dengan IP & Port Target
      */
-    public function connect(Device $device)
+    public function __construct(string $ip, int $port = 4370)
     {
-        try {
-            $zk = new ZKTeco($device->ip_address, $device->port);
-            if ($zk->connect()) {
-                return $zk;
-            }
-        } catch (\Exception $e) {
-            Log::error("ZKTeco Connection Error: " . $e->getMessage());
-        }
-        return false;
+        $this->ip = $ip;
+        $this->port = $port;
+        $this->zk = new ZKTeco($this->ip, $this->port);
     }
 
     /**
-     * Test connection to the device.
-     * 
-     * @param Device $device
-     * @return bool
+     * Membuka koneksi ke mesin
      */
-    public function testConnection(Device $device): bool
+    public function connect(): bool
     {
-        $zk = $this->connect($device);
-        if ($zk) {
-            $zk->disconnect();
+        if ($this->isConnected) {
             return true;
         }
-        return false;
+
+        try {
+            if ($this->zk->connect()) {
+                $this->isConnected = true;
+                return true;
+            }
+            Log::warning("ZKTeco: Gagal connect ke {$this->ip}:{$this->port}");
+            return false;
+        } catch (Exception $e) {
+            Log::error("ZKTeco Connection Error: " . $e->getMessage());
+            return false;
+        }
     }
 
     /**
-     * Get all users from the device.
-     * 
-     * @param Device $device
-     * @return array
+     * Menutup koneksi (Penting biar slot user di mesin gak penuh)
      */
-    public function getEmployees(Device $device)
+    public function disconnect(): void
     {
-        $zk = $this->connect($device);
-        if (!$zk)
-            return [];
+        if ($this->isConnected && $this->zk) {
+            $this->zk->disconnect();
+            $this->isConnected = false;
+        }
+    }
+
+    /**
+     * Ambil Serial Number Mesin (Untuk Validasi ADMS)
+     */
+    public function getSerialNumber(): ?string
+    {
+        if (!$this->connect())
+            return null;
 
         try {
-            $users = $zk->getUser();
-            return $users;
-        } catch (\Exception $e) {
+            // Library kadang return string dengan null byte, kita bersihkan
+            $sn = $this->zk->serialNumber();
+            return $this->cleanString($sn);
+        } catch (Exception $e) {
+            Log::error("ZKTeco Get Serial Number Error: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Ambil Semua User dari Mesin (Tanpa Template Jari)
+     */
+    public function getUsers(): Collection
+    {
+        if (!$this->connect())
+            return collect([]);
+
+        try {
+            $users = $this->zk->getUser(); // Return array
+
+            // Kita ubah array mentah jadi Collection rapi
+            return collect($users)->map(function ($user) {
+                return [
+                    'uid' => $user['uid'], // ID Internal Mesin (1, 2, 3...)
+                    'userid' => $this->cleanString($user['userid'] ?? ''), // Badge Number (NIK/String)
+                    'name' => $this->cleanString($user['name'] ?? ''),
+                    'role' => $user['role'] ?? 0,
+                    'password' => $user['password'] ?? '',
+                    'cardno' => $user['cardno'] ?? 0,
+                ];
+            });
+        } catch (Exception $e) {
             Log::error("ZKTeco Get Users Error: " . $e->getMessage());
-            return [];
-        } finally {
-            $zk->disconnect();
+            return collect([]);
         }
     }
 
     /**
-     * Get attendance logs from the device.
-     * 
-     * @param Device $device
-     * @return array
+     * Ambil Template Jari User Tertentu
      */
-    public function getAttendance(Device $device)
+    public function getFingerprints(int $uid): Collection
     {
-        $zk = $this->connect($device);
-        if (!$zk)
-            return [];
+        if (!$this->connect())
+            return collect([]);
 
         try {
-            $attendance = $zk->getAttendance();
-            return $attendance;
-        } catch (\Exception $e) {
+            // Solution X-100C biasanya support index 0-9 per user
+            $templates = [];
+
+            // Loop cek semua jari
+            // Note: Ini agak lambat, gunakan dengan bijak
+            for ($i = 0; $i <= 9; $i++) {
+                $template = $this->zk->getUserTemplate($uid, $i);
+                if ($template && !empty($template[2])) {
+                    $templates[] = [
+                        'finger_index' => $i,
+                        'template_data' => $template[2], // Raw data template
+                        'size' => $template[1] ?? 0
+                    ];
+                }
+            }
+
+            return collect($templates);
+        } catch (Exception $e) {
+            Log::error("ZKTeco Get Fingerprints Error: " . $e->getMessage());
+            return collect([]);
+        }
+    }
+
+    /**
+     * Ambil SEMUA Template Jari dari Mesin (Untuk Sync)
+     */
+    public function getAllFingerprints(): Collection
+    {
+        if (!$this->connect())
+            return collect([]);
+
+        try {
+            $fingerprints = $this->zk->getFingerprint();
+
+            return collect($fingerprints)->map(function ($fp) {
+                return [
+                    'uid' => $fp['uid'],
+                    'finger_id' => $fp['id'] ?? $fp['fid'] ?? 0,
+                    'template' => $fp['template'] ?? $fp['tmp'] ?? '',
+                    'size' => $fp['size'] ?? 0,
+                ];
+            });
+        } catch (Exception $e) {
+            Log::error("ZKTeco Get All Fingerprints Error: " . $e->getMessage());
+            return collect([]);
+        }
+    }
+
+    /**
+     * Ambil Log Absensi (Attendance)
+     */
+    public function getAttendance(): Collection
+    {
+        if (!$this->connect())
+            return collect([]);
+
+        try {
+            $logs = $this->zk->getAttendance();
+
+            return collect($logs)->map(function ($log) {
+                return [
+                    'uid' => $log['uid'] ?? 0,
+                    'badge_number' => $this->cleanString($log['id'] ?? $log['userid'] ?? ''),
+                    'state' => $log['state'] ?? 0, // Masuk/Pulang/Lembur
+                    'timestamp' => $log['timestamp'] ?? now(),
+                    'type' => $log['type'] ?? 1, // 1=Finger, 4=Card, 15=Face
+                ];
+            });
+        } catch (Exception $e) {
             Log::error("ZKTeco Get Attendance Error: " . $e->getMessage());
-            return [];
-        } finally {
-            $zk->disconnect();
+            return collect([]);
         }
     }
 
     /**
-     * Get fingerprint templates for a user.
-     * 
-     * @param Device $device
-     * @return array
+     * Upload User Baru ke Mesin (PUSH)
      */
-    public function getFingerprint(Device $device)
+    public function setUser(int $uid, string $badgeNumber, string $name, string $password = '', int $role = 0, int $cardNumber = 0): bool
     {
-        $zk = $this->connect($device);
-        if (!$zk)
-            return [];
-
-        try {
-            // rats/zkteco usually provides getFingerprint() returning all templates
-            return $zk->getFingerprint();
-        } catch (\Exception $e) {
-            Log::error("ZKTeco Get Fingerprint Error: " . $e->getMessage());
-            return [];
-        } finally {
-            $zk->disconnect();
-        }
-    }
-
-    /**
-     * Set fingerprint template for a user.
-     * 
-     * @param Device $device
-     * @param int $uid
-     * @param array $templateData
-     * @return bool
-     */
-    public function setFingerprint(Device $device, int $uid, array $templateData)
-    {
-        $zk = $this->connect($device);
-        if (!$zk)
+        if (!$this->connect())
             return false;
 
         try {
-            // $templateData should contain: 'uid', 'id' (finger index), 'template' (data)
-            return $zk->setFingerprint($uid, $templateData['id'], $templateData['template']);
-        } catch (\Exception $e) {
+            // Set User Info
+            return $this->zk->setUser($uid, $badgeNumber, $name, $password, $role, $cardNumber);
+        } catch (Exception $e) {
+            Log::error("ZKTeco Set User Error: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Upload Template Jari ke Mesin (PUSH Finger)
+     */
+    public function setFingerprint(int $uid, int $fingerIndex, string $templateData): bool
+    {
+        if (!$this->connect())
+            return false;
+
+        try {
+            // Set Template
+            return $this->zk->setUserTemplate($uid, $fingerIndex, $templateData);
+        } catch (Exception $e) {
             Log::error("ZKTeco Set Fingerprint Error: " . $e->getMessage());
             return false;
-        } finally {
-            $zk->disconnect();
         }
     }
 
     /**
-     * Clear attendance logs from the device.
-     * 
-     * @param Device $device
-     * @return bool
+     * Hapus User dari Mesin
      */
-    public function clearAttendance(Device $device)
+    public function deleteUser(int $uid): bool
     {
-        $zk = $this->connect($device);
-        if (!$zk)
+        if (!$this->connect())
             return false;
 
         try {
-            return $zk->clearAttendance();
-        } catch (\Exception $e) {
-            Log::error("ZKTeco Clear Attendance Error: " . $e->getMessage());
+            return $this->zk->deleteUser($uid);
+        } catch (Exception $e) {
+            Log::error("ZKTeco Delete User Error: " . $e->getMessage());
             return false;
-        } finally {
-            $zk->disconnect();
         }
     }
 
     /**
-     * Ping the device IP address.
-     * 
-     * @param Device $device
-     * @return bool
+     * Clear Attendance Logs (Hapus semua log absensi)
      */
-    public function ping(Device $device): bool
+    public function clearAttendance(): bool
     {
-        $ip = escapeshellarg($device->ip_address);
-        // Linux ping: -c count, -W timeout (seconds)
-        $cmd = "ping -c 3 -W 1 {$ip}";
+        if (!$this->connect())
+            return false;
+
+        try {
+            return $this->zk->clearAttendance();
+        } catch (Exception $e) {
+            Log::error("ZKTeco Clear Attendance Error: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Restart Mesin (Remote Reboot)
+     */
+    public function restart(): bool
+    {
+        if (!$this->connect())
+            return false;
+
+        try {
+            return $this->zk->restart();
+        } catch (Exception $e) {
+            Log::error("ZKTeco Restart Error: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Clear Admin (Jaga-jaga kalau admin terkunci/lupa password)
+     */
+    public function clearAdmin(): bool
+    {
+        if (!$this->connect())
+            return false;
+
+        try {
+            return $this->zk->clearAdmin();
+        } catch (Exception $e) {
+            Log::error("ZKTeco Clear Admin Error: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Ping Device (Test Network Reachability)
+     */
+    public function ping(): bool
+    {
+        $ip = escapeshellarg($this->ip);
+
+        // Windows menggunakan -n, Linux menggunakan -c
+        $isWindows = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
+        $cmd = $isWindows
+            ? "ping -n 3 -w 1000 {$ip}"
+            : "ping -c 3 -W 1 {$ip}";
+
         exec($cmd, $output, $status);
         return $status === 0;
+    }
+
+    /**
+     * Helper: Bersihkan string dari karakter aneh (Null bytes)
+     */
+    private function cleanString($value): string
+    {
+        if (is_string($value)) {
+            // Hapus null byte dan trim spasi
+            return trim(str_replace(chr(0), '', $value));
+        }
+        return (string) $value;
+    }
+
+    /**
+     * Destructor: Pastikan koneksi putus saat class selesai dipakai
+     * Ini penting agar slot koneksi di mesin tidak penuh
+     */
+    public function __destruct()
+    {
+        $this->disconnect();
     }
 }

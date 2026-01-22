@@ -51,21 +51,21 @@ class SmartSync extends Page
             return;
 
         $device = Device::find($this->selectedDeviceId);
-        $service = new ZKTecoService();
+        $service = new ZKTecoService($device->ip_address, $device->port);
 
         // 1. Fetch Device Users
-        $deviceUsers = $service->getEmployees($device); // Returns array of user data
+        $deviceUsers = $service->getUsers(); // Returns Collection
 
-        if (empty($deviceUsers) && !$service->connect($device)) {
-            Notification::make()->title('Connection Failed')->danger()->send();
+        if ($deviceUsers->isEmpty()) {
+            Notification::make()->title('Connection Failed or No Users')->danger()->send();
             return;
         }
 
         // Fetch Fingerprints to count
-        $fingerprints = $service->getFingerprint($device);
-        $fpCountMap = collect($fingerprints)->groupBy('uid')->map(fn($g) => $g->count());
+        $fingerprints = $service->getAllFingerprints();
+        $fpCountMap = $fingerprints->groupBy('uid')->map(fn($g) => $g->count());
 
-        $deviceUserMap = collect($deviceUsers)->mapWithKeys(fn($u) => [$u['userid'] => $u]);
+        $deviceUserMap = $deviceUsers->mapWithKeys(fn($u) => [$u['userid'] => $u]);
 
         // 2. Fetch DB Users
         $dbUsers = Employee::all()->keyBy('badge_number');
@@ -82,12 +82,12 @@ class SmartSync extends Page
         ];
 
         // 4. Populate Device Contents View
-        $this->deviceContents = collect($deviceUsers)->map(function ($u) use ($fpCountMap) {
+        $this->deviceContents = $deviceUsers->map(function ($u) use ($fpCountMap) {
             return [
                 'userid' => $u['userid'],
                 'name' => $u['name'],
                 'role' => $u['role'],
-                'finger_count' => $fpCountMap->get($u['uid'], 0), // Use uid (internal ID) or userid depending on lib
+                'finger_count' => $fpCountMap->get($u['uid'], 0),
             ];
         })->values()->toArray();
 
@@ -110,10 +110,9 @@ class SmartSync extends Page
     protected function bulkSyncToDevice(array $employees, bool $single = false)
     {
         $device = Device::find($this->selectedDeviceId);
-        $service = new ZKTecoService();
-        $zk = $service->connect($device);
+        $service = new ZKTecoService($device->ip_address, $device->port);
 
-        if (!$zk) {
+        if (!$service->connect()) {
             Notification::make()->title('Connection Failed')->danger()->send();
             return;
         }
@@ -122,19 +121,19 @@ class SmartSync extends Page
         foreach ($employees as $empData) {
             $emp = (object) $empData;
             try {
-                $zk->setUser(
+                $service->setUser(
                     (int) $emp->badge_number,
                     (int) $emp->badge_number,
                     $emp->name,
                     '',
                     0,
-                    (int) ($emp->card_number ?? 0) // Fix: Cast to int
+                    (int) ($emp->card_number ?? 0)
                 );
                 $count++;
             } catch (\Exception $e) {
+                Log::error("Sync to device failed: " . $e->getMessage());
             }
         }
-        $zk->disconnect();
 
         $msg = $single ? "User synced to Device" : "Synced {$count} users to Device";
         Notification::make()->title($msg)->success()->send();

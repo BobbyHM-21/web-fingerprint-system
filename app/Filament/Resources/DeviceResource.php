@@ -94,11 +94,12 @@ class DeviceResource extends Resource
                     ->label('Test')
                     ->icon('heroicon-o-signal')
                     ->action(function (Device $record) {
-                        $service = new \App\Services\ZKTecoService();
-                        if ($service->testConnection($record)) {
-                            $record->update(['last_activity' => now(), 'is_online' => true]);
+                        $service = new \App\Services\ZKTecoService($record->ip_address, $record->port);
+                        if ($service->connect()) {
+                            $sn = $service->getSerialNumber();
+                            $record->update(['last_activity' => now(), 'is_online' => true, 'serial_number' => $sn]);
                             \Filament\Notifications\Notification::make()
-                                ->title('Connection Successful')
+                                ->title('Connection Successful' . ($sn ? " (SN: $sn)" : ''))
                                 ->success()
                                 ->send();
                         } else {
@@ -114,8 +115,8 @@ class DeviceResource extends Resource
                     ->icon('heroicon-o-command-line')
                     ->color('gray')
                     ->action(function (Device $record) {
-                        $service = new \App\Services\ZKTecoService();
-                        if ($service->ping($record)) {
+                        $service = new \App\Services\ZKTecoService($record->ip_address, $record->port);
+                        if ($service->ping()) {
                             $record->update(['last_activity' => now(), 'is_online' => true]);
                             \Filament\Notifications\Notification::make()
                                 ->title('Ping Successful')
@@ -148,10 +149,10 @@ class DeviceResource extends Resource
                     ->icon('heroicon-o-users')
                     ->color('info')
                     ->action(function (Device $record) {
-                        $service = new \App\Services\ZKTecoService();
-                        $users = $service->getEmployees($record);
-
-                        if (empty($users)) {
+                        $service = new \App\Services\ZKTecoService($record->ip_address, $record->port);
+                        $users = $service->getUsers(); // Returns Collection
+            
+                        if ($users->isEmpty()) {
                             \Filament\Notifications\Notification::make()
                                 ->title('No employees found or connection failed')
                                 ->warning()
@@ -163,16 +164,12 @@ class DeviceResource extends Resource
 
                         $count = 0;
                         foreach ($users as $user) {
-                            // Determine privilege: 14=Admin, 0=User (Adjust based on ZK SDK actual return)
-                            // Often ZK returns 'role' or 'privilege'
-                            $privilege = isset($user['role']) ? $user['role'] : 0;
-
                             $employee = \App\Models\Employee::updateOrCreate(
-                                ['badge_number' => $user['uid']], // Using UID/Badge as unique identifier
+                                ['badge_number' => $user['userid']], // Using userid as badge_number
                                 [
                                     'name' => $user['name'],
                                     'card_number' => $user['cardno'] ?? null,
-                                    'privilege' => $privilege,
+                                    'privilege' => $user['role'] ?? 0,
                                     'password' => $user['password'] ?? null,
                                 ]
                             );
