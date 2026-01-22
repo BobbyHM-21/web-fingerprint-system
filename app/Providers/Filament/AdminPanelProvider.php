@@ -55,6 +55,15 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
-            ]);
+            ])
+            // Urutan grup menu (logis sesuai workflow HRD)
+            ->navigationGroups([
+                'Monitoring',
+                'Personalia',
+                'Absensi',
+                'Pengaturan',
+            ])
+            // Agar grup bisa di-collapse (dilipat)
+            ->collapsibleNavigationGroups(true);
     }
 }

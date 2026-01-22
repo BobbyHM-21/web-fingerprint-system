@@ -17,6 +17,9 @@ class BiometricTemplateResource extends Resource
 {
     protected static ?string $model = BiometricTemplate::class;
 
+    // Sembunyikan dari menu sidebar (data teknis)
+    protected static bool $shouldRegisterNavigation = false;
+
     protected static ?string $navigationIcon = 'heroicon-o-finger-print';
     protected static ?string $navigationGroup = 'Personalia';
     protected static ?string $navigationLabel = 'Data Jari & Wajah';

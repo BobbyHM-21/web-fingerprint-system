@@ -17,6 +17,9 @@ class DeviceEmployeeSyncResource extends Resource
 {
     protected static ?string $model = DeviceEmployeeSync::class;
 
+    // Sembunyikan dari menu sidebar (tabel teknis sync)
+    protected static bool $shouldRegisterNavigation = false;
+
     protected static ?string $navigationIcon = 'heroicon-o-arrow-path';
     protected static ?string $navigationGroup = 'Monitoring';
     protected static ?string $navigationLabel = 'Status Sinkronisasi';
