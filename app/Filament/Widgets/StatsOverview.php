@@ -16,7 +16,7 @@ class StatsOverview extends BaseWidget
     protected function getStats(): array
     {
         // Hitung Hadir Hari Ini (Unik berdasarkan Badge Number)
-        $presentToday = AttendanceLog::whereDate('scan_time', today())
+        $presentToday = AttendanceLog::whereDate('timestamp', today())
             ->distinct('badge_number')
             ->count('badge_number');
 
