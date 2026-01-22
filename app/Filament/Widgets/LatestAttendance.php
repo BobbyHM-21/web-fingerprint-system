@@ -17,13 +17,13 @@ class LatestAttendance extends BaseWidget
         return $table
             ->query(
                 // Ambil 10 log terakhir
-                AttendanceLog::query()->latest('scan_time')->limit(10)
+                AttendanceLog::query()->latest('timestamp')->limit(10)
             )
             ->columns([
-                Tables\Columns\TextColumn::make('scan_time')
+                Tables\Columns\TextColumn::make('timestamp')
                     ->label('Waktu')
                     ->dateTime('H:i:s') // Jam saja cukup
-                    ->description(fn($record) => $record->scan_time->format('d M Y')),
+                    ->description(fn($record) => $record->timestamp->format('d M Y')),
 
                 Tables\Columns\TextColumn::make('badge_number')
                     ->label('ID')
