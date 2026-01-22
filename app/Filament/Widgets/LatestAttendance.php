@@ -2,55 +2,58 @@
 
 namespace App\Filament\Widgets;
 
+use App\Models\AttendanceLog;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
-use App\Models\AttendanceLog;
 
 class LatestAttendance extends BaseWidget
 {
-    protected int|string|array $columnSpan = 'full';
-
-    protected static ?int $sort = 2;
-
-    protected static ?string $heading = 'Aktivitas Terkini';
+    protected static ?string $heading = 'Aktivitas Absensi Terkini';
+    protected int|string|array $columnSpan = 'full'; // Lebar penuh biar lega
 
     public function table(Table $table): Table
     {
         return $table
             ->query(
-                AttendanceLog::query()->latest('timestamp')->limit(5)
+                // Ambil 10 log terakhir
+                AttendanceLog::query()->latest('scan_time')->limit(10)
             )
             ->columns([
-                Tables\Columns\TextColumn::make('timestamp')
-                    ->dateTime()
-                    ->label('Waktu Scan')
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('employee.name')
-                    ->label('Karyawan')
-                    ->default('Unknown'),
+                Tables\Columns\TextColumn::make('scan_time')
+                    ->label('Waktu')
+                    ->dateTime('H:i:s') // Jam saja cukup
+                    ->description(fn($record) => $record->scan_time->format('d M Y')),
+
                 Tables\Columns\TextColumn::make('badge_number')
-                    ->label('Badge ID'),
+                    ->label('ID')
+                    ->weight('bold'),
+
+                // Lookup nama pegawai
+                Tables\Columns\TextColumn::make('employee_name')
+                    ->label('Nama Pegawai')
+                    ->state(function ($record) {
+                        return \App\Models\Employee::where('badge_number', $record->badge_number)->value('name') ?? 'Unknown';
+                    }),
+
                 Tables\Columns\TextColumn::make('device.name')
-                    ->label('Mesin (Lokasi)'),
-                Tables\Columns\TextColumn::make('status')
-                    ->label('Status')
-                    ->badge()
-                    ->color(fn(int $state): string => match ($state) {
-                        0 => 'success', // Check In
-                        1 => 'danger',  // Check Out
-                        default => 'warning',
+                    ->label('Mesin')
+                    ->default('-'),
+
+                Tables\Columns\IconColumn::make('verification_mode')
+                    ->label('Mode')
+                    ->icon(fn($state) => match ($state) {
+                        1 => 'heroicon-o-finger-print',
+                        15 => 'heroicon-o-face-smile',
+                        default => 'heroicon-o-identification',
                     })
-                    ->formatStateUsing(fn(int $state): string => match ($state) {
-                        0 => 'Check In',
-                        1 => 'Check Out',
-                        2 => 'Break Out',
-                        3 => 'Break In',
-                        4 => 'OT In',
-                        5 => 'OT Out',
-                        default => (string) $state,
+                    ->tooltip(fn($state) => match ($state) {
+                        1 => 'Fingerprint',
+                        15 => 'Face Recognition',
+                        4 => 'Card',
+                        default => 'Unknown',
                     }),
             ])
-            ->paginated(false);
+            ->paginated(false); // Matikan pagination biar ringkas
     }
 }
