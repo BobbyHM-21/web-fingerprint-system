@@ -16,6 +16,7 @@ use Filament\Tables\Table;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\DB;
 use Filament\Forms\Components\Select;
+use Illuminate\Support\Facades\Log;
 
 class EmployeeResource extends Resource
 {
@@ -74,38 +75,60 @@ class EmployeeResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('badge_number')
-                    ->label('Badge ID')
+                    ->label('ID')
                     ->searchable()
                     ->sortable()
                     ->weight('bold')
-                    ->copyable(),
+                    ->color('primary'),
 
                 Tables\Columns\TextColumn::make('name')
-                    ->label('Nama Pegawai')
+                    ->label('Nama')
                     ->searchable()
-                    ->sortable(),
+                    ->description(fn(Employee $record) => $record->position ?? '-'),
 
-                Tables\Columns\TextColumn::make('department')
-                    ->label('Departemen')
-                    ->sortable()
-                    ->toggleable(),
+                // --- FITUR MATRIX DISTRIBUSI (VISUALISASI) ---
+                Tables\Columns\TextColumn::make('distribution_matrix')
+                    ->label('Sebaran Data')
+                    ->html() // Mengizinkan HTML custom
+                    ->state(function (Employee $record) {
+                        // Ambil semua mesin aktif (Cache query ini biar ringan)
+                        static $allDevices = null;
+                        if (!$allDevices) {
+                            $allDevices = Device::where('is_active', true)->orderBy('name')->get();
+                        }
 
-                // Kolom Canggih: Menghitung jumlah jari yang terdaftar
+                        // Ambil ID mesin di mana user ini sudah ada
+                        $syncedDeviceIds = $record->devices->pluck('id')->toArray();
+
+                        $html = '<div class="flex gap-1 flex-wrap">';
+
+                        foreach ($allDevices as $device) {
+                            // Cek apakah user ada di mesin ini?
+                            $isSynced = in_array($device->id, $syncedDeviceIds);
+
+                            // Style Visual
+                            $color = $isSynced ? 'bg-success-500 text-white' : 'bg-gray-200 text-gray-400';
+                            $tooltip = $device->name . ($isSynced ? ' (Tersedia)' : ' (Belum Ada)');
+
+                            // Kode Lokasi (3 Huruf Pertama, misal: JKT, SBY)
+                            $code = strtoupper(substr($device->location ?? $device->name, 0, 3));
+
+                            $html .= "
+                                <div class='px-1.5 py-0.5 rounded text-[10px] font-bold {$color}' title='{$tooltip}' style='cursor:help'>
+                                    {$code}
+                                </div>
+                            ";
+                        }
+
+                        $html .= '</div>';
+                        return $html;
+                    }),
+
                 Tables\Columns\TextColumn::make('biometric_templates_count')
                     ->counts('biometricTemplates')
                     ->label('Jari')
                     ->badge()
-                    ->color(fn($state) => $state > 0 ? 'success' : 'danger')
-                    ->formatStateUsing(fn($state) => $state . ' Jari'),
-
-                // Kolom Canggih: Menampilkan di berapa mesin dia terdaftar
-                Tables\Columns\TextColumn::make('devices_count')
-                    ->counts('devices')
-                    ->label('Sync')
-                    ->badge()
-                    ->color('info')
-                    ->formatStateUsing(fn($state) => $state . ' Mesin')
-                    ->icon('heroicon-m-arrow-path'),
+                    ->color(fn($state) => $state > 0 ? 'success' : 'danger'),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('department')
@@ -135,20 +158,22 @@ class EmployeeResource extends Resource
                 Tables\Actions\BulkActionGroup::make([
                     Tables\Actions\DeleteBulkAction::make(),
 
-                    // FITUR BONUS: Push ke Mesin (Bulk Action)
+                    // --- FITUR EKSEKUSI: PUSH (KIRIM) DATA ---
                     Tables\Actions\BulkAction::make('push_to_device')
-                        ->label('Kirim ke Mesin')
-                        ->icon('heroicon-o-arrow-up-tray')
+                        ->label('Kirim ke Mesin (Push)')
+                        ->icon('heroicon-o-paper-airplane')
+                        ->color('success')
                         ->form([
                             Select::make('device_id')
                                 ->label('Pilih Mesin Tujuan')
-                                ->options(Device::where('is_active', true)->pluck('name', 'id'))
-                                ->required(),
+                                ->options(Device::where('is_active', true)->where('protocol', '!=', 'offline')->pluck('name', 'id'))
+                                ->required()
+                                ->helperText('Hanya mesin Online (Direct IP) yang bisa menerima Push instan.'),
                         ])
                         ->action(function (array $data, \Illuminate\Database\Eloquent\Collection $records) {
-                            // Logic Push akan kita bahas detail nanti kalau Pull sudah sukses
-                            Notification::make()->title('Fitur Push akan segera hadir!')->info()->send();
-                        }),
+                            self::pushDataProcess($data['device_id'], $records);
+                        })
+                        ->deselectRecordsAfterCompletion(),
                 ]),
             ]);
     }
@@ -217,8 +242,6 @@ class EmployeeResource extends Resource
                 }
 
                 // 3. Ambil Template Jari (Looping 0-9)
-                // Hati-hati: Ini bisa lama jika user banyak. 
-                // Idealnya kita cek dulu apakah jumlah jari di DB < jumlah di mesin.
                 $templates = $zk->getFingerprints($userData['uid']);
 
                 foreach ($templates as $tpl) {
@@ -252,12 +275,80 @@ class EmployeeResource extends Resource
                 ->title('Sinkronisasi Sukses! 🚀')
                 ->body("Ditarik: {$countNew} Pegawai Baru, {$countUpdated} Terupdate.")
                 ->success()
-                ->persistent() // Notifikasi tidak hilang otomatis biar admin baca
+                ->persistent()
                 ->send();
 
         } catch (\Exception $e) {
             DB::rollBack();
             Notification::make()->title('Error saat Sync')->body($e->getMessage())->danger()->send();
         }
+    }
+
+    /**
+     * LOGIC PUSH: Mengirim data pegawai terpilih ke mesin tertentu
+     */
+    protected static function pushDataProcess($deviceId, $employees)
+    {
+        $device = Device::find($deviceId);
+
+        // Validasi Dasar
+        if (!$device || $device->protocol === 'offline') {
+            Notification::make()->title('Gagal: Mesin Offline/USB tidak bisa menerima Push.')->danger()->send();
+            return;
+        }
+
+        // Koneksi ke Mesin
+        $zk = new ZKTecoService($device->ip_address, $device->port);
+        if (!$zk->connect()) {
+            Notification::make()->title("Gagal Connect ke {$device->name}")->danger()->send();
+            return;
+        }
+
+        $successCount = 0;
+        $failCount = 0;
+
+        foreach ($employees as $emp) {
+            try {
+                // 1. Upload User Info
+                // Convert privilege web ke privilege mesin (jika perlu)
+                $role = ($emp->position === 'Manager') ? 14 : 0;
+
+                // Perintah PUSH User
+                $zk->setUser(
+                    uid: $emp->id, // Gunakan ID database sebagai UID mesin
+                    badgeNumber: $emp->badge_number,
+                    name: $emp->name,
+                    password: $emp->password ?? '',
+                    role: $role,
+                    cardNumber: (int) ($emp->card_number ?? 0)
+                );
+
+                // 2. Upload Template Jari (Jika ada)
+                foreach ($emp->biometricTemplates as $finger) {
+                    $zk->setFingerprint(
+                        uid: $emp->id,
+                        fingerIndex: $finger->finger_id,
+                        templateData: $finger->template
+                    );
+                }
+
+                // 3. Update Matrix (Tandai sudah sync)
+                DeviceEmployeeSync::updateOrCreate(
+                    ['device_id' => $device->id, 'employee_id' => $emp->id],
+                    ['is_synced_to_device' => true, 'synced_at' => now()]
+                );
+
+                $successCount++;
+            } catch (\Exception $e) {
+                $failCount++;
+                Log::error("Push failed for {$emp->badge_number}: " . $e->getMessage());
+            }
+        }
+
+        Notification::make()
+            ->title("Push Selesai")
+            ->body("Berhasil: {$successCount}, Gagal: {$failCount}")
+            ->success()
+            ->send();
     }
 }
