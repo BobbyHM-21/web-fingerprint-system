@@ -16,6 +16,9 @@ class Employee extends Model
         'password',
         'card_number',
         'privilege',
+        'department',   // HRD field
+        'position',     // HRD field
+        'is_active',    // HRD field
     ];
 
     public function biometricTemplates()

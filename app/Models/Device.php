@@ -11,15 +11,19 @@ class Device extends Model
 {
     protected $fillable = [
         'name',
+        'serial_number',  // ADMS identifier
         'ip_address',
         'port',
         'protocol',
         'is_active',
+        'is_online',
         'last_activity',
+        'location',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
+        'is_online' => 'boolean',
         'last_activity' => 'datetime',
     ];
 
